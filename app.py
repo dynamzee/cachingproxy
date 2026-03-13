@@ -4,24 +4,23 @@ import pickle
 from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor
 
+import redis
 import requests
 from flask import Flask, Response, g, request
-from redis import ConnectionPool, Redis
 
 load_dotenv()
 
 REDIS_URL = os.environ.get("REDIS_URL")
+PROXY_URL = os.environ.get("PROXY_URL")
+PROXY_EXPIRY = int(os.environ.get("PROXY_EXPIRY", 3600))  # Seconds
 
 app = Flask(__name__)
-
-PROXY_URL = os.environ.get("PROXY_URL")
-PROXY_EXPIRY = int(os.environ.get("PROXY_EXPIRY"))  # Seconds
 
 REDIS_HOST = os.environ.get("REDIS_HOST")
 REDIS_PORT = int(os.environ.get("REDIS_PORT"))
 REDIS_PASSWORD = os.environ.get("REDIS_PASSWORD")
 
-redis_pool = ConnectionPool.from_url(
+redis_pool = redis.ConnectionPool.from_url(
     REDIS_URL,
     decode_responses=False,
     socket_connect_timeout=10,
@@ -35,7 +34,7 @@ executor = ThreadPoolExecutor(max_workers=10)
 @app.before_request
 def setup_database():
     """Set up the database"""
-    g.r = Redis( connection_pool=redis_pool)
+    g.r = redis.Redis( connection_pool=redis_pool)
 
 def fetch_from_upstream(url):
     """Fetch data from upstream server"""
@@ -52,7 +51,8 @@ def fetch_from_upstream(url):
         )
         return response
     except requests.RequestException as error:
-        return f"Error fetching data from {url}: {error}"
+        print(f"UPSTREAM ERROR {error}.")
+        return None
 
 
 def compress_data(data):
@@ -63,7 +63,6 @@ def compress_data(data):
 def decompress_data(compressed_data):
     """Decompress data from storage"""
     return pickle.loads(gzip.decompress(compressed_data))
-
 
 @app.route("/", defaults={"path": ""}, methods=["GET"])
 @app.route("/<path:path>", methods=["GET"])
@@ -84,7 +83,7 @@ def caching_proxy(path):
 
             return response
     except Exception as error:
-        print(f"ERROR: {error}.")
+        print(f"CACHE READ ERROR: {error}.")
 
     # Cache miss - fetch from upstream
     full_uri = f"{PROXY_URL}{request.full_path}"
@@ -121,7 +120,7 @@ def store_in_cache(redis_client, key, data, expiry):
         compressed_data = compress_data(data)
         redis_client.set(key, compressed_data, ex=expiry)
     except Exception as error:
-        print(f"ERROR: {error}.")
+        print(f"CACHE WRITE ERROR: {error}.")
 
 @app.route("/health", methods=["GET"])
 def health_check():
@@ -139,7 +138,6 @@ def clear_cache():
         return {"error": str(error)}, 500
 
 if __name__ == "__main__":
-    print("🚀 Proxy is starting on http://127.0.0.1:5000")
     app.run(port=5000, debug=True)
 
 
