@@ -10,6 +10,8 @@ from redis import ConnectionPool, Redis
 
 load_dotenv()
 
+REDIS_URL = os.environ.get("REDIS_URL")
+
 app = Flask(__name__)
 
 PROXY_URL = os.environ.get("PROXY_URL")
@@ -19,29 +21,21 @@ REDIS_HOST = os.environ.get("REDIS_HOST")
 REDIS_PORT = int(os.environ.get("REDIS_PORT"))
 REDIS_PASSWORD = os.environ.get("REDIS_PASSWORD")
 
-redis_pool = ConnectionPool(
-    host=REDIS_HOST,
-    port=REDIS_PORT,
-    password=REDIS_PASSWORD,
-    db=0,
+redis_pool = ConnectionPool.from_url(
+    REDIS_URL,
     decode_responses=False,
-    max_connections=20,
-    socket_connect_timeout=5,
-    socket_timeout=5,
+    socket_connect_timeout=10,
+    socket_timeout=10,
     retry_on_timeout=True,
+    ssl_cert_reqs=None
 )
 
 executor = ThreadPoolExecutor(max_workers=10)
 
-
 @app.before_request
 def setup_database():
     """Set up the database"""
-    g.r = Redis(
-        connection_pool=redis_pool,
-        ssl = True,
-        ssl_cert_reqs = None
-    )
+    g.r = Redis( connection_pool=redis_pool)
 
 def fetch_from_upstream(url):
     """Fetch data from upstream server"""
