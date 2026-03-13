@@ -20,14 +20,14 @@ REDIS_HOST = os.environ.get("REDIS_HOST")
 REDIS_PORT = int(os.environ.get("REDIS_PORT"))
 REDIS_PASSWORD = os.environ.get("REDIS_PASSWORD")
 
-redis_pool = redis.ConnectionPool.from_url(
+redis_pool = redis.from_url(
     REDIS_URL,
     decode_responses=False,
     socket_connect_timeout=10,
     socket_timeout=10,
     retry_on_timeout=True,
     ssl_cert_reqs=None
-)
+).connection_pool
 
 executor = ThreadPoolExecutor(max_workers=10)
 
