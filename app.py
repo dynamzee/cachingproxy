@@ -1,10 +1,12 @@
 import gzip
 import os
 import pickle
+import urllib
+
 from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor
 
-import redis
+from urllib import parse
 from redis import Redis
 import requests
 from flask import Flask, Response, g, request
@@ -13,13 +15,9 @@ load_dotenv()
 
 REDIS_URL = os.environ.get("REDIS_URL")
 PROXY_URL = os.environ.get("PROXY_URL")
-PROXY_EXPIRY = int(os.environ.get("PROXY_EXPIRY", 3600))  # Seconds
+PROXY_EXPIRY = int(os.environ.get("PROXY_EXPIRY", 3600))
 
 app = Flask(__name__)
-
-REDIS_HOST = os.environ.get("REDIS_HOST")
-REDIS_PORT = int(os.environ.get("REDIS_PORT"))
-REDIS_PASSWORD = os.environ.get("REDIS_PASSWORD")
 
 redis_pool = Redis.from_url(
     REDIS_URL,
@@ -51,15 +49,22 @@ def fetch_from_upstream(url):
             },
         )
         return response
-    except requests.RequestException as error:
-        print(f"UPSTREAM ERROR {error}.")
-        return None
+    except requests.exceptions.Timeout:
+        print(f"UPSTREAM ERROR: Timeout occurred for {url}")
+    except requests.exceptions.ConnectionError:
+        print(f"UPSTREAM ERROR: Failed to connect to {url}")
+    except requests.exceptions.HTTPError as error:
+        print(f"UPSTREAM ERROR: HTTP {error.response.status_code} for {url}")
+    except requests.exceptions.RequestException as error:
+        print(f"UPSTREAM ERROR: A serious error occurred: {error}")
+    except Exception as error:
+        print(f"CRITICAL UNKNOWN ERROR: {error}")
 
+    return None
 
 def compress_data(data):
     """Compress data for efficient storage"""
     return gzip.compress(pickle.dumps(data))
-
 
 def decompress_data(compressed_data):
     """Decompress data from storage"""
@@ -87,7 +92,7 @@ def caching_proxy(path):
         print(f"CACHE READ ERROR: {error}.")
 
     # Cache miss - fetch from upstream
-    full_uri = f"{PROXY_URL}{request.full_path}"
+    full_uri = urllib.parse.urljoin(PROXY_URL, request.full_path)
     upstream_response = fetch_from_upstream(full_uri)
 
     if upstream_response is None:
@@ -125,23 +130,24 @@ def store_in_cache(redis_client, key, data, expiry):
 
 @app.route("/health", methods=["GET"])
 def health_check():
-    """Health check endpoint"""
-    return {"status": "healthy"}
-
+    try:
+        # Ping Redis to make sure the connection is alive
+        g.r.ping()
+        return {"status": "healthy", "redis": "connected"}, 200
+    except Exception as error:
+        return {"status": "unhealthy", "reason": str(error)}, 503
 
 @app.route("/cache/clear", methods=["POST"])
 def clear_cache():
     """Clear cache endpoint"""
     try:
-        g.r.flushdb()
+        g.r.delete(*g.r.keys("cache:*"))
         return {"status": "cache cleared"}
     except Exception as error:
         return {"error": str(error)}, 500
 
 if __name__ == "__main__":
     app.run(port=5000, debug=True)
-
-
 
 
 
