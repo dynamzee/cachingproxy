@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor
 
 from urllib import parse
+import redis
 from redis import Redis
 import requests
 from flask import Flask, Response, g, request
@@ -19,14 +20,13 @@ PROXY_EXPIRY = int(os.environ.get("PROXY_EXPIRY", 3600))
 
 app = Flask(__name__)
 
-redis_pool = Redis.from_url(
+redis_pool = redis.ConnectionPool.from_url(
     REDIS_URL,
     decode_responses=False,
     socket_connect_timeout=10,
     socket_timeout=10,
     retry_on_timeout=True,
-    ssl_cert_reqs=None
-).connection_pool
+)
 
 executor = ThreadPoolExecutor(max_workers=10)
 
