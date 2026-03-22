@@ -2,11 +2,11 @@ import gzip
 import os
 import pickle
 import urllib
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor
 
-from urllib import parse
 import redis
 from redis import Redis
 import requests
@@ -18,10 +18,17 @@ REDIS_URL = os.environ.get("REDIS_URL")
 PROXY_URL = os.environ.get("PROXY_URL")
 PROXY_EXPIRY = int(os.environ.get("PROXY_EXPIRY", 3600))
 
+parsed = urlparse(REDIS_URL)
+
 app = Flask(__name__)
 
-redis_pool = redis.ConnectionPool.from_url(
-    REDIS_URL,
+redis_pool = redis.ConnectionPool(
+    host=parsed.hostname,
+    port=parsed.port,
+    password=parsed.password,
+    username=parsed.username,
+    db=int(parsed.path.replace("/", "") or 0),
+    ssl=parsed.scheme == "rediss",
     decode_responses=False,
     socket_connect_timeout=10,
     socket_timeout=10,
@@ -33,7 +40,7 @@ executor = ThreadPoolExecutor(max_workers=10)
 @app.before_request
 def setup_database():
     """Set up the database"""
-    g.r = Redis( connection_pool=redis_pool)
+    g.r = Redis(connection_pool=redis_pool)
 
 def fetch_from_upstream(url):
     """Fetch data from upstream server"""
