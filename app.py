@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor
 
-from redis import Redis
+from redis import ConnectionPool
 import requests
 from flask import Flask, Response, g, request
 
@@ -21,7 +21,7 @@ parsed = urlparse(REDIS_URL)
 
 app = Flask(__name__)
 
-redis_client = Redis.from_url(
+redis_client = ConnectionPool(
     REDIS_URL,
     decode_responses=False,
     socket_connect_timeout=10,
