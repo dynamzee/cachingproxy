@@ -22,16 +22,10 @@ parsed = urlparse(REDIS_URL)
 
 app = Flask(__name__)
 
-redis_pool = redis.ConnectionPool(
-    host=parsed.hostname,
-    port=parsed.port,
-    password=parsed.password,
-    username=parsed.username,
-    db=int(parsed.path.replace("/", "") or 0),
-    ssl=parsed.scheme == "rediss",
+redis_pool = redis.ConnectionPool.from_url(
+    REDIS_URL,
     decode_responses=False,
     socket_connect_timeout=10,
-    socket_timeout=10,
     retry_on_timeout=True,
 )
 
