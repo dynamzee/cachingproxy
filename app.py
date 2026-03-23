@@ -7,7 +7,6 @@ from urllib.parse import urlparse
 from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor
 
-import redis
 from redis import Redis
 import requests
 from flask import Flask, Response, g, request
@@ -22,7 +21,7 @@ parsed = urlparse(REDIS_URL)
 
 app = Flask(__name__)
 
-redis_pool = redis.ConnectionPool.from_url(
+redis_client = Redis.from_url(
     REDIS_URL,
     decode_responses=False,
     socket_connect_timeout=10,
@@ -34,7 +33,7 @@ executor = ThreadPoolExecutor(max_workers=10)
 @app.before_request
 def setup_database():
     """Set up the database"""
-    g.r = Redis(connection_pool=redis_pool)
+    g.r = redis_client
 
 def fetch_from_upstream(url):
     """Fetch data from upstream server"""
