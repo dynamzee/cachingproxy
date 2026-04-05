@@ -1,91 +1,172 @@
-# High-Performance Caching Proxy
+# caching-proxy
 
-A blazing-fast caching proxy server built with Flask and Redis.
+A Flask-based HTTP reverse proxy with Redis-backed response caching, API key authentication, per-minute rate limiting, and admin endpoints for key management and cache invalidation.
 
-## Performance Optimizations Implemented
+---
 
-### 1. **Connection Pooling**
+## How It Works
 
-- Redis connection pool with 20 max connections
-- Connection reuse reduces overhead
-- Configurable timeout and retry settings
+Incoming requests are authenticated via an API key passed in the `X-API-Key` header. If a cached response exists in Redis for the requested path, it is returned immediately with `X-Cache: HIT`. On a cache miss, the request is forwarded to the configured upstream server, the response is returned to the client with `X-Cache: MISS`, and the response body is compressed (gzip) and stored in Redis asynchronously via a `ThreadPoolExecutor` — keeping the response time unaffected by the write.
 
-### 2. **Asynchronous Operations**
+---
 
-- Cache writes happen asynchronously (fire-and-forget)
-- ThreadPoolExecutor for non-blocking cache operations
-- Responses return immediately without waiting for cache writes
+## Features
 
-### 3. **Data Compression**
+- **Redis response caching** — compressed with gzip before storage
+- **API key authentication** — keys stored in Redis, passed via `X-API-Key` header
+- **Sliding-window rate limiting** — per API key, per minute, enforced with Redis pipelines
+- **Async cache writes** — background thread pool keeps latency low
+- **`X-Cache` headers** — `HIT` or `MISS` on every proxied response
+- **Admin endpoints** — create/revoke keys, clear cache
+- **Health check** — `/health` verifies Redis connectivity
 
-- Gzip compression for cached data
-- Pickle serialization (faster than JSON)
-- Significant memory savings in Redis
+---
 
-### 4. **Optimized HTTP Requests**
+## Requirements
 
-- Connection keep-alive for upstream requests
-- Optimized timeout settings (3s connect, 10s read)
-- Proper user-agent and headers
+- Python 3.8+
+- Redis instance
+- Dependencies: `flask`, `redis`, `requests`, `python-dotenv`
 
+---
 
-## Quick Start
+## Setup
 
-### Development
+**1. Clone the repo and install dependencies:**
 
 ```bash
-# Install dependencies
-pip install -r requirements.txt
+pip install flask redis requests python-dotenv
+```
 
-# Set environment variables
-cp .env.example .env
-# Edit .env with your configuration
+**2. Create a `.env` file:**
 
-# Run with Flask development server
+```env
+REDIS_URL=redis://localhost:6379
+PROXY_URL=https://your-upstream-server.com
+PROXY_EXPIRY=3600
+ADMIN_KEY=your-secret-admin-key
+RATE_LIMIT=100
+```
+
+| Variable | Description | Default |
+|---|---|---|
+| `REDIS_URL` | Redis connection URL | required |
+| `PROXY_URL` | Upstream server to proxy to | required |
+| `PROXY_EXPIRY` | Cache TTL in seconds | `3600` |
+| `ADMIN_KEY` | Key for admin endpoints | required |
+| `RATE_LIMIT` | Max requests per minute per API key | `100` |
+
+**3. Run the server:**
+
+```bash
 python app.py
 ```
 
-## API Endpoints
+---
 
-- `GET /` - Proxy requests to upstream server
-- `GET /<path>` - Proxy requests to upstream server with path
-- `POST /cache/clear` - Clear cache
+## Authentication
 
-## Environment Variables
+All routes (except `/health`) require authentication.
 
-- `PROXY_URL` - Upstream server URL
-- `PROXY_EXPIRY` - Cache expiry time in seconds
-- `REDIS_HOST` - Redis server host
-- `REDIS_PORT` - Redis server port
-- `REDIS_PASSWORD` - Redis password (optional)
+**Proxy routes** require an API key:
 
-## Performance Monitoring
+```
+X-API-Key: <your-api-key>
+```
 
-The proxy includes several headers for monitoring:
+**Admin routes** require the admin key:
 
-- `X-Cache: HIT|MISS` - Cache status
+```
+X-Admin-Key: <your-admin-key>
+```
 
-## Benchmarking
+---
 
-A benchmark was performed which evaluated the `/posts/1` endpoint under a steady load of 10 requests per second, simulating 600 virtual users. The results demonstrate robust and consistent performance aligned with industry standards for proxy responsiveness and reliability:
+## API Reference
 
-### Throughput: 
+### Proxy
 
-600 requests were processed with a 100% success rate (HTTP 200), and zero failures or errors.
+```
+GET /<path>
+```
 
-- **Response Time:**  
-  - **Mean:** 3 ms  
-  - **Median (p50):** 3 ms  
-  - **95th percentile (p95):** 4 ms  
-  - **Maximum:** 8 ms  
-  - **99th percentile (p99):** 6 ms  
-- **Session Length:**  
-  - **Mean:** 5.7 ms  
-  - **Median:** 5.3 ms  
-  - **95th percentile:** 8.4 ms  
-  - **Maximum:** 28.8 ms
+Proxies the request to the upstream server. Returns cached response if available.
 
-All response times are well below the commonly accepted industry threshold of 100 ms for high-performance APIs, indicating excellent scalability and low latency under load. No virtual user sessions failed, confirming stable and reliable service behavior throughout the test.
+**Response headers:**
 
-### Inspiration
-https://roadmap.sh/projects/caching-server
+| Header | Value |
+|---|---|
+| `X-Cache` | `HIT` (served from cache) or `MISS` (fetched from upstream) |
+
+---
+
+### Admin
+
+#### Create an API key
+
+```
+POST /keys/create
+X-Admin-Key: <admin-key>
+Content-Type: application/json
+
+{ "label": "my-client" }
+```
+
+```json
+{ "api_key": "...", "label": "my-client" }
+```
+
+#### Revoke an API key
+
+```
+POST /keys/revoke
+X-Admin-Key: <admin-key>
+Content-Type: application/json
+
+{ "api_key": "..." }
+```
+
+#### Clear the cache
+
+```
+POST /cache/clear
+X-Admin-Key: <admin-key>
+```
+
+```json
+{ "status": "cache cleared", "keys_deleted": 42 }
+```
+
+#### Health check
+
+```
+GET /health
+```
+
+```json
+{ "status": "healthy", "redis": "connected" }
+```
+
+---
+
+## Rate Limiting
+
+Each API key is limited to `RATE_LIMIT` requests per minute (default: 100). The limit is tracked using a Redis key scoped to the current 60-second window. Exceeding it returns:
+
+```json
+{
+  "error": "Rate limit exceeded.",
+  "limit": 100,
+  "requests_this_minute": 101
+}
+```
+
+with a `429` status code.
+
+---
+
+## License
+
+MIT
+
+
